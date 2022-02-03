@@ -14,17 +14,32 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    iwr6843aop.init();
-    iwr6843aop.configure("6843AOP_3d.cfg");
+    iwr6843aop.configure("6843AOP_3d_withRange.cfg");
 
 
     iwr6843aop.start();
 
-    uint32_t counter = 30;
+    uint32_t counter = 5000;
+
+    std::vector<radar::RadarPointCartesian> radarData;
 
     while (counter != 0)
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+       iwr6843aop.getpointCloud(radarData);
+       std::cout << "Frame: " << counter << "\n";
+       for (auto& point : radarData)
+       {
+           std::cout << "x: " << point.x
+                   << " y: " << point.y
+                   << " z: " << point.z
+                   << " V:" << point.velocity
+                   << " S:" << point.snr
+                   << " N:" << point.noise
+                   << " M:" << point.magnitude
+                   << "\n";
+       }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
         counter--;
     }
 

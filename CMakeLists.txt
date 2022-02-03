@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(iwr6843aop VERSION 0.0.1)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # Only set the standart settings if this is not part of another project
@@ -53,4 +53,3 @@ endif()
 
 add_subdirectory(src)
 add_subdirectory(test)
-

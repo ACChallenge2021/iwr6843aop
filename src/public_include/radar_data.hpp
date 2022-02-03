@@ -32,6 +32,10 @@ namespace radar
             /*! @brief y - CFAR noise level of the side of the detected cell in dB expressed in 0.1 steps of dB */
             int16_t noise;
 
+            /*! @brief at 0th Doppler (stationary objects). The point represent the sum of log2 magnitudes of
+             * received antennas expressed in Q9 format.*/
+            uint16_t magnitude;
+
     };
 }
 

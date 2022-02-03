@@ -6,32 +6,17 @@
 #include <thread>
 #include <chrono>
 #include <thread>
-
+#include <algorithm>
 #include <iwr6843aop.hpp>
-#include <radar_data.hpp>
 #include <serial/serial.h>
 #include "TripleBuffer.h"
-#include "iwr6843aop_mmwave.hpp"
-
+#include "DataHelper.hpp"
 
 namespace iwr6843
 {
     const std::string iwr6843aopTag("10c4:ea70");
     const std::array<uint8_t, 8> magicWord = {2, 1, 4, 3, 6, 5, 8, 7};
     //const std::array<uint8_t, 8> magicWord = {1, 2, 3, 4, 5, 6, 7, 8};
-
-    enum class ParserState {
-        READ_HEADER,
-        CHECK_TLV_TYPE,
-        READ_OBJ_STRUCT,
-        READ_LOG_MAG_RANGE,
-        READ_NOISE,
-        READ_AZIMUTH,
-        READ_DOPPLER,
-        READ_STATS,
-        SWAP_BUFFERS,
-        READ_SIDE_INFO
-    };
 
     std::vector<std::string> uartports;
 
@@ -164,6 +149,10 @@ namespace iwr6843
                 }
             }
         }
+        else
+        {
+            printf("Error open config file %s, Reason: %s\n", configFile.c_str(), strerror(errno));
+        }
         return 1;
     }
 
@@ -224,7 +213,8 @@ namespace iwr6843
         }
 
         printf("iwr6843aop: Start reading...\n");
-        std::vector<uint8_t>& currentFrame = readBuffer->currentWriteValue();
+        //std::vector<uint8_t>& currentFrame = readBuffer->currentWriteValue();
+        std::vector<uint8_t> currentFrame;
 
         auto runtime = std::chrono::microseconds{0}.count();
 
@@ -249,9 +239,26 @@ namespace iwr6843
             /*If a magicWord is found wait for sorting to finish and switch buffers*/
             if( last8Bytes == magicWord)
             {
-                //printf("read next frame.\n");
-                readBuffer->swapWriteBuffer();
-                currentFrame = readBuffer->currentWriteValue();
+                //std::vector<uint8_t>& currentFrame1 = readBuffer->currentWriteValue();
+//                printf("read next frame, frame1. size %u, %u\n", static_cast<uint32_t>(currentFrame1.size()),
+//                       static_cast<uint32_t>(currentFrame1.size()));
+                //readBuffer->swapWriteBuffer();
+                //printf("read next frame. size %u\n", static_cast<uint32_t>(currentFrame.size()));
+//                std::fstream output("radarFrame.bin", output.binary | output.out);
+//                if (output.good())
+//                {
+//
+//                    output.write(reinterpret_cast<char*>(currentFrame.data()), currentFrame.size());
+//
+//                    output.flush();
+//                    output.close();
+//                }
+                readBuffer->update(currentFrame);
+                //currentFrame = readBuffer->currentWriteValue();
+                currentFrame.clear();
+                //printf("read next frame. size %u\n", static_cast<uint32_t>(currentFrame.size()));
+                //currentFrame.clear();
+                last8Bytes.fill(0);
                 auto end = std::chrono::high_resolution_clock::now();
                 runtime += std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
                 start = end;
@@ -271,137 +278,48 @@ namespace iwr6843
     }
 
 
-    uint8_t parseHeader(std::vector<uint8_t>& currentFrame,
-                     uint32_t& currentDataPos,
-                     MmwDemo_output_message_header_t& header)
-    {
-        //get version (4 bytes)
-        memcpy( &header.version, &currentFrame.data()[currentDataPos], sizeof(header.version));
-        currentDataPos += ( sizeof(header.version) );
 
-        //get totalPacketLen (4 bytes)
-        memcpy( &header.totalPacketLen, &currentFrame.data()[currentDataPos], sizeof(header.totalPacketLen));
-        currentDataPos += ( sizeof(header.totalPacketLen) );
-
-        //get platform (4 bytes)
-        memcpy( &header.platform, &currentFrame.data()[currentDataPos], sizeof(header.platform));
-        currentDataPos += ( sizeof(header.platform) );
-
-        //if packet doesn't have correct header size (which is based on platform), throw it away
-        //  (does not include magicWord since it was already removed)
-        uint32_t headerSize;
-
-        if ((header.platform & 0xFFFF) == 0x1443)  // platform is xWR1443)
-        {
-           headerSize = 7 * 4;  // xWR1443 SDK demo header does not have subFrameNumber field
-        }
-        else
-        {
-           headerSize = 8 * 4;  // header includes subFrameNumber field
-        }
-
-        if(currentFrame.size() < headerSize)
-        {
-            return 0;
-        }
-
-        //get frameNumber (4 bytes)
-        memcpy( &header.frameNumber, &currentFrame.data()[currentDataPos], sizeof(header.frameNumber));
-        currentDataPos += ( sizeof(header.frameNumber) );
-
-        //get timeCpuCycles (4 bytes)
-        memcpy( &header.timeCpuCycles, &currentFrame.data()[currentDataPos], sizeof(header.timeCpuCycles));
-        currentDataPos += ( sizeof(header.timeCpuCycles) );
-
-        //get numDetectedObj (4 bytes)
-        memcpy( &header.numDetectedObj, &currentFrame.data()[currentDataPos], sizeof(header.numDetectedObj));
-        currentDataPos += ( sizeof(header.numDetectedObj) );
-
-        //get numTLVs (4 bytes)
-        memcpy( &header.numTLVs, &currentFrame.data()[currentDataPos], sizeof(header.numTLVs));
-        currentDataPos += ( sizeof(header.numTLVs) );
-
-        //get subFrameNumber (4 bytes) (not used for XWR1443)
-        if((header.platform & 0xFFFF) != 0x1443)
-        {
-           memcpy( &header.subFrameNumber, &currentFrame.data()[currentDataPos], sizeof(header.subFrameNumber));
-           currentDataPos += ( sizeof(header.subFrameNumber) );
-        }
-
-        return 1;
-    }
-
-    void parseIncommingData(std::unique_ptr<kria::TripleBuffer<std::vector<uint8_t>>>& readBuffer,
+    void runParseData(std::unique_ptr<kria::TripleBuffer<std::vector<uint8_t>>>& readBuffer,
                             std::unique_ptr<kria::TripleBuffer<std::vector<radar::RadarPointCartesian>>>& pointCloud,
                             std::atomic_uint8_t& stop)
     {
 
         printf("Start parse incomming data.\n");
 
-        ParserState parserState = ParserState::READ_HEADER;
 
-        MmwDemo_output_message_header_t mmwheader;
-        uint32_t currentDataPos = 0;
+        auto runtime = std::chrono::microseconds{0}.count();
+
+        auto start = std::chrono::high_resolution_clock::now();
+
+        uint32_t frameCounter = 0;
 
         while(stop == 0)
         {
-            std::vector<radar::RadarPointCartesian>& currentPoints = pointCloud->currentWriteValue();
-
             if (readBuffer->swapReadBuffer())
             {
                 std::vector<uint8_t>& currentFrame = readBuffer->read();
-                switch(parserState)
-                {
-                    case ParserState::READ_HEADER:
-                    {
-                        //make sure packet has at least first three fields (12 bytes) before we read them (does not include magicWord since it was already removed)
-                        if(currentFrame.size() < 12)
-                        {
-                           //printf("Error Frame size\n");
-                           parserState = ParserState::SWAP_BUFFERS;
-                           break;
-                        }
+                std::vector<radar::RadarPointCartesian> currentPoints;
 
-                        uint8_t parseResult = parseHeader(currentFrame, currentDataPos, mmwheader);
+                //printf("parse next frame. size %u\n", static_cast<uint32_t>(currentFrame.size()));
+                //std::vector<radar::RadarPointCartesian>& currentPoints = pointCloud->currentWriteValue();
+                //currentPoints.clear();
+                DataHelper::parseIncomingData(currentFrame, currentPoints);
 
-                        //if packet lengths do not match, throw it away
-                        if(parseResult && mmwheader.totalPacketLen == currentFrame.size() )
-                        {
-                           parserState = ParserState::CHECK_TLV_TYPE;
-                        }
-                        else
-                        {
-                            parserState = ParserState::SWAP_BUFFERS;
-                        }
-                    }
-                        break;
+                //pointCloud->swapWriteBuffer();
+                pointCloud->update(currentPoints);
 
-                    case ParserState::READ_OBJ_STRUCT:
-                        break;
-                    case ParserState::READ_SIDE_INFO:
-                        break;
-                    case ParserState::READ_LOG_MAG_RANGE:
-                        break;
-                    case ParserState::READ_NOISE:
-                        break;
-                    case ParserState::READ_AZIMUTH:
-                        break;
-                    case ParserState::READ_DOPPLER:
-                        break;
-                    case ParserState::READ_STATS:
-                        break;
-                    case ParserState::CHECK_TLV_TYPE:
-                        parserState = ParserState::SWAP_BUFFERS;
-                        break;
-                    case ParserState::SWAP_BUFFERS:
-                        pointCloud->swapWriteBuffer();
-                        currentDataPos = 0;
-                        parserState = ParserState::READ_HEADER;
-                        break;
-                    default: break;
-                }
-            }
+                auto end = std::chrono::high_resolution_clock::now();
+                runtime += std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+                start = end;
+                frameCounter++;
+             }
+        }
             //printf("header obj: %d\n", mmwheader.numDetectedObj);
+        if (frameCounter != 0)
+        {
+            runtime /= frameCounter;
+            float framerate = 1.0f / (runtime / 1000.0f / 1000.0f);
+            printf ("iwr6843aop: Parse thread frame rate for %d frames: %f fps.\n", frameCounter, framerate);
         }
     }
 
@@ -439,7 +357,7 @@ namespace iwr6843
         thread_readData = std::thread(&readDataFromSensor, std::ref(readBuffer),
                                       std::ref(stopReadData),
                                       uartports.at(1), 921600);
-        thread_parseData = std::thread(&parseIncommingData, std::ref(readBuffer),
+        thread_parseData = std::thread(&runParseData, std::ref(readBuffer),
                                              std::ref(pointCloud),
                                               std::ref(stopParseData));
         return 1;
@@ -476,7 +394,14 @@ namespace iwr6843
 
 	void Iwr6843aop::getpointCloud(std::vector<radar::RadarPointCartesian>& radarData)
 	{
-
+	    if(pointCloud->swapReadBuffer())
+	    {
+	        radarData = pointCloud->read();
+	    }
+	    else
+	    {
+	        radarData.clear();
+	    }
 	}
 
 }

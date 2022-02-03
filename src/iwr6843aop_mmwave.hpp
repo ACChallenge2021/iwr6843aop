@@ -31,6 +31,33 @@ namespace iwr6843
         uint32_t    subFrameNumber;
     };
 
+    enum class TlvTypes
+    {
+        MMWDEMO_OUTPUT_MSG_NULL = 0,
+        /*! @brief   List of detected points */
+        MMWDEMO_OUTPUT_MSG_DETECTED_POINTS,
+
+        /*! @brief   Range profile */
+        MMWDEMO_OUTPUT_MSG_RANGE_PROFILE,
+
+        /*! @brief   Noise floor profile */
+        MMWDEMO_OUTPUT_MSG_NOISE_PROFILE,
+
+        /*! @brief   Samples to calculate static azimuth  heatmap */
+        MMWDEMO_OUTPUT_MSG_AZIMUTH_STATIC_HEAT_MAP,
+
+        /*! @brief   Range/Doppler detection matrix */
+        MMWDEMO_OUTPUT_MSG_RANGE_DOPPLER_HEAT_MAP,
+
+        /*! @brief   Stats information */
+        MMWDEMO_OUTPUT_MSG_STATS,
+
+        /*! @brief   List of detected points side information */
+        MMWDEMO_OUTPUT_MSG_DETECTED_POINTS_SIDE_INFO,
+
+        MMWDEMO_OUTPUT_MSG_MAX
+    };
+
 }
 
 #endif /* SRC_IWR6843AOP_MMWAVE_HPP_ */
